@@ -15,23 +15,26 @@ prefix_regex = '^https?://(?P<domain>%s)' % domain_regex
 
 def main():
 		parser = argparse.ArgumentParser()
-		parser.add_argument('-f', '--feed',
-												choices='main presentation composited all'.split())
+		parser.add_argument('-f', '--feed', choices='main presentation composited all'.split())
 		parser.add_argument('-u', '--username')
 		parser.add_argument('-p', '--password')
 		parser.add_argument('url')
 		args = parser.parse_args()
 
 		mo = re.match(prefix_regex + r'/videos/video/(?P<id>\d+)/$', args.url)
+		
 		if mo is None:
 				parser.error("Invalid URL")
+		
 		id = int(mo.group('id'))
 		domain = mo.group('domain')
 
 		s = requests.Session()
+		
 		# Force HTTPS
 		response = s.get('https://%s/videos/video/%s/' % (domain, id), verify=False)
 		if response.history:
+				
 				# We were redirected, so a login is probably needed
 				token_pattern = (r"<input type='hidden' name='csrfmiddlewaretoken' " +
 												 r"value='([^']+)' />")
@@ -46,8 +49,8 @@ def main():
 											csrfmiddlewaretoken=mo.group(1)),
 						headers=dict(referer=referer))
 				assert response.status_code == 200, response.status_code
-		response = s.get(
-				'https://%s/videos/video/%s/authorize-playback/' % (domain, id), verify=False)
+		
+		response = s.get('https://%s/videos/video/%s/authorize-playback/' % (domain, id), verify=False)
 		o = response.json()
 		json_string = json.dumps(o)
 		assert o['status'] == 0
@@ -173,7 +176,6 @@ def main():
 				env = dict(LD_LIBRARY_PATH='rtmpdump/librtmp')
 
 		if args.feed == 'all':
-
 				try:
 						# iOS
 						p0 = subprocess.Popen(cmd0)
