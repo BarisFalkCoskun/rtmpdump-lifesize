@@ -197,10 +197,10 @@ def main():
 								pass
 
 				# if (o['composited_feeds']):
-				# 		try:
-				# 				p3 = subprocess.Popen(cmd3, env=env)
-				# 		except Exception:
-				# 				pass
+				#     try:
+				#         p3 = subprocess.Popen(cmd3, env=env)
+				#     except Exception:
+				#         pass
 
 				try:
 						p1.wait()
@@ -214,10 +214,10 @@ def main():
 								pass
 
 				# if (o['composited_feeds']):
-				# 		try:
-				# 				p3.wait()
-				# 		except Exception:
-				# 				pass
+				#     try:
+				#         p3.wait()
+				#     except Exception:
+				#         pass
 
 				try:
 						# Creates valid version of lecture video
@@ -245,15 +245,15 @@ def main():
 								pass
 
 				# if (len(o['composited_feeds']) > 0):
-				# 		try:
-				# 				# Creates valid version of composited video
-				# 				p8 = subprocess.Popen(cmd8)
-				# 				p8.wait()
-				# 				# Deletes old version
-				# 				p9 = subprocess.Popen(cmd9)
-				# 				p9.wait()
-				# 		except Exception:
-				# 				pass
+				#     try:
+				#         # Creates valid version of composited video
+				#         p8 = subprocess.Popen(cmd8)
+				#         p8.wait()
+				#         # Deletes old version
+				#         p9 = subprocess.Popen(cmd9)
+				#         p9.wait()
+				#     except Exception:
+				#         pass
 		elif args.feed == 'presentation':
 				if (o['pres_feed']):
 						p2 = subprocess.Popen(cmd2, env=env)
