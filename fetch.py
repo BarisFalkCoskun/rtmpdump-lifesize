@@ -1,40 +1,44 @@
-import re
-import argparse
+#!/usr/local/bin/python3
+
 import requests
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 import subprocess
-import json
 import platform
-
-# Ignore warning
-requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
+import argparse
+import json
+import re
 
 DOMAINS = ['vc.agrsci.dk', 'vc.au.dk', '130.226.243.18']
 domain_regex = '|'.join(re.escape(domain) for domain in DOMAINS)
 prefix_regex = '^https?://(?P<domain>%s)' % domain_regex
 
+requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
+
+# python3 fetch.py -f all http://vc.au.dk/videos/video/1234/
+
+def valid_filename(i):
+    if (i.isalnum() or i == ' ' or i in r'-_.,' or i.isdigit()):
+        return True
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('-f', '--feed', choices='main presentation composited all'.split())
+    parser.add_argument('-f', '--feed',
+                        choices='main presentation all composited'.split())
     parser.add_argument('-u', '--username')
     parser.add_argument('-p', '--password')
     parser.add_argument('url')
     args = parser.parse_args()
 
     mo = re.match(prefix_regex + r'/videos/video/(?P<id>\d+)/$', args.url)
-
     if mo is None:
         parser.error("Invalid URL")
-
     id = int(mo.group('id'))
     domain = mo.group('domain')
 
     s = requests.Session()
-
     # Force HTTPS
     response = s.get('https://%s/videos/video/%s/' % (domain, id), verify=False)
     if response.history:
-
         # We were redirected, so a login is probably needed
         token_pattern = (r"<input type='hidden' name='csrfmiddlewaretoken' " +
                          r"value='([^']+)' />")
@@ -46,17 +50,18 @@ def main():
         response = s.post(
             response.url,
             data=dict(username=args.username, password=args.password,
-                      csrfmiddlewaretoken=mo.group(1)),
+                        csrfmiddlewaretoken=mo.group(1)),
             headers=dict(referer=referer))
         assert response.status_code == 200, response.status_code
-
-    response = s.get('https://%s/videos/video/%s/authorize-playback/' % (domain, id), verify=False)
+    response = s.get(
+        'https://%s/videos/video/%s/authorize-playback/' % (domain, id), verify=False)
     o = response.json()
     json_string = json.dumps(o)
     assert o['status'] == 0
 
+    print(id)
+
     try:
-        # Get highest quality available
         path1 = o['main_feeds'][len(o['main_feeds']) - 1]
         path1 = path1[len(path1) - 1]
     except Exception:
@@ -77,12 +82,12 @@ def main():
     token = o['playback_token']
     print("Playback token is %s" % token)
 
-    # Removes any illegal characters
-    name = "".join(i for i in o['video_name'] if i not in r'\/:*?"<>|')
+    name = o['video_name']
+    name = name.replace("&", "and")
+    name = "".join(i for i in name if valid_filename(i))
 
     try:
-        # iOS video (usually full screen presentation video and tiny lecture video in bottom right corner)
-        cmd0 = [
+        dlIOSCmd = [
             'youtube-dl', '--no-check-certificate', '-o', '%s (composited) [%s].mp4' % (name, id),
             'https://vc.au.dk/videos/video/' + str(id) + '/authorize-playback-ios/1/'
         ]
@@ -91,7 +96,7 @@ def main():
 
     try:
         # Lecture video
-        cmd1 = [
+        dlMainCmd = [
             'rtmpdump/rtmpdump','-v', '-r',
             'rtmp://%s:1935' % hostname + '/' + streamer_path + '/' + path1,
             '-a', streamer_path,
@@ -107,7 +112,7 @@ def main():
 
     try:
         # Presentation video
-        cmd2 = [
+        dlPresCmd = [
             'rtmpdump/rtmpdump', '-v', '-r',
             'rtmp://%s:1935' % hostname + '/' + streamer_path + '/' + path2,
             '-a', streamer_path,
@@ -122,7 +127,7 @@ def main():
 
     try:
         # Composited video
-        cmd3 = [
+        dlCompositedCmd = [
             'rtmpdump/rtmpdump', '-v', '-r',
             'rtmp://%s:1935' % hostname + '/' + streamer_path + '/' + path3,
             '-a', streamer_path,
@@ -136,144 +141,185 @@ def main():
         pass
 
     # Creates a valid version of video, otherwise it won't be playable in many video players
-    cmd4 = [
+    validMainCmd = [
         'ffmpeg', '-nostdin', '-hide_banner', '-nostats', '-i',
         '%s (main) [%s]_1.mp4' % (name, id),
         '-c', 'copy', '-y',
         '%s (main) [%s].mp4' % (name, id)
     ]
 
-    cmd5 = [
+    extractMainAudioCmd = [
+        'ffmpeg', '-nostdin', '-hide_banner', '-nostats', '-i',
+        '%s (main) [%s].mp4' % (name, id),
+        '-vn', '-acodec', 'copy', 'main-%s.aac' % (id)
+    ]
+
+    deleteMainCmd = [
         'rm', '-f', '%s (main) [%s]_1.mp4' % (name, id)
     ]
 
-    cmd6 = [
+    importMainAudioCmd = [
+        'ffmpeg', '-nostdin', '-hide_banner', '-nostats', '-i',
+        '%s (presentation) [%s]_1.mp4' % (name, id),
+        '-i', 'main-%s.aac' % (id), '-c', 'copy', '-y',
+        '%s (presentation) [%s].mp4' % (name, id)
+    ]
+
+    deleteMainAudioCmd = [
+        'rm', '-f', 'main-%s.aac' % (id)
+    ]
+
+    validPresCmd = [
         'ffmpeg', '-nostdin', '-hide_banner', '-nostats', '-i',
         '%s (presentation) [%s]_1.mp4' % (name, id),
         '-c', 'copy', '-y',
         '%s (presentation) [%s].mp4' % (name, id)
     ]
 
-    cmd7 = [
+    deletePresCmd = [
         'rm', '-f', '%s (presentation) [%s]_1.mp4' % (name, id)
     ]
 
-    cmd8 = [
+    validCompositedCmd = [
         'ffmpeg', '-nostdin', '-hide_banner', '-nostats', '-i',
         '%s (composited) [%s]_1.mp4' % (name, id),
         '-c', 'copy', '-y',
         '%s (composited) [%s].mp4' % (name, id)
     ]
 
-    cmd9 = [
+    deleteCompositedCmd = [
         'rm', '-f', '%s (composited) [%s]_1.mp4' % (name, id)
     ]
 
     # macOS
     if (platform.system() == "Darwin"):
-        env = dict(DYLD_LIBRARY_PATH='rtmpdump/librtmp')
+            env = dict(DYLD_LIBRARY_PATH='rtmpdump/librtmp')
     else:
-        env = dict(LD_LIBRARY_PATH='rtmpdump/librtmp')
+            env = dict(LD_LIBRARY_PATH='rtmpdump/librtmp')
 
     if args.feed == 'all':
+        if (o['is_live']):
+            while (o['is_live']):
+                # Sleep an hour and check if lecture is done
+                time.sleep(3600)
+                response = s.get('https://%s/videos/video/%s/authorize-playback/' % (domain, id), verify=False)
+                o = response.json()
+                assert o['status'] == 0
+
         try:
-            # iOS
-            p0 = subprocess.Popen(cmd0)
-            p0.wait()
+            dlIOS = subprocess.Popen(dlIOSCmd)
+            dlIOS.wait()
+
+            if (dlIOS.returncode != 0 and o['composited_feeds']):
+                dlComposited = subprocess.Popen(dlCompositedCmd, env=env)
         except Exception:
             pass
 
         try:
-            # Lecture
-            p1 = subprocess.Popen(cmd1, env=env)
+            dlMain = subprocess.Popen(dlMainCmd, env=env)
         except Exception:
             pass
 
-        # Checks if available (not always available for whatever reason)
         if (o['pres_feed']):
             try:
-                p2 = subprocess.Popen(cmd2, env=env)
+                dlPres = subprocess.Popen(dlPresCmd, env=env)
             except Exception:
                 pass
 
-        # if (o['composited_feeds']):
-        #     try:
-        #         p3 = subprocess.Popen(cmd3, env=env)
-        #     except Exception:
-        #         pass
-
         try:
-            p1.wait()
+            dlMain.wait()
         except Exception:
             pass
 
         if (o['pres_feed']):
             try:
-                p2.wait()
+                dlPres.wait()
             except Exception:
                 pass
 
-        # if (o['composited_feeds']):
-        #     try:
-        #         p3.wait()
-        #     except Exception:
-        #         pass
-
         try:
-            # Creates valid version of lecture video
-            p4 = subprocess.Popen(cmd4)
-            p4.wait()
+            validMain = subprocess.Popen(validMainCmd)
+            validMain.wait()
         except Exception:
             pass
-
+        
         try:
-            # Removes the old version
-            p5 = subprocess.Popen(cmd5)
-            p5.wait()
+            deleteMain = subprocess.Popen(deleteMainCmd)
+            deleteMain.wait()
         except Exception:
             pass
-
+        
         if (o['pres_feed']):
             try:
-                # Creates valid version of presentation video
-                p6 = subprocess.Popen(cmd6)
-                p6.wait()
+                extractMainAudio = subprocess.Popen(extractMainAudioCmd)
+                extractMainAudio.wait()
+            except Exception:
+                pass
+            
+            try:
+                importMainAudio = subprocess.Popen(importMainAudioCmd)
+                importMainAudio.wait()
+            except Exception:
+                pass
+
+            try:
+                deleteMainAudio = subprocess.Popen(deleteMainAudioCmd)
+                deleteMainAudio.wait()
+            except Exception:
+                pass
+
+            try:
+                deletePres = subprocess.Popen(deletePresCmd)
+                deletePres.wait()
+            except Exception:
+                pass
+
+        if (dlIOS.returncode != 0 and len(o['composited_feeds']) > 0):
+            try:
+                dlComposited.wait()
+
+                # Creates valid version of composited video
+                validComposited = subprocess.Popen(validCompositedCmd)
+                validComposited.wait()
+
                 # Deletes old version
-                p7 = subprocess.Popen(cmd7)
-                p7.wait()
+                deleteComposited = subprocess.Popen(deleteCompositedCmd)
+                deleteComposited.wait()
             except Exception:
                 pass
-
-        # if (len(o['composited_feeds']) > 0):
-        #     try:
-        #         # Creates valid version of composited video
-        #         p8 = subprocess.Popen(cmd8)
-        #         p8.wait()
-        #         # Deletes old version
-        #         p9 = subprocess.Popen(cmd9)
-        #         p9.wait()
-        #     except Exception:
-        #         pass
     elif args.feed == 'presentation':
-        if (o['pres_feed']):
-            p2 = subprocess.Popen(cmd2, env=env)
-            p2.wait()
-            p6 = subprocess.Popen(cmd6)
-            p6.wait()
-            p7 = subprocess.Popen(cmd7)
-            p7.wait()
-        else:
-            print("Sorry, not available")
+        dlPres = subprocess.Popen(dlPresCmd, env=env)
+        dlPres.wait()
+
+        validPres = subprocess.Popen(validPresCmd)
+        validPres.wait()
+
+        deletePres = subprocess.Popen(deletePresCmd)
+        deletePres.wait()
     elif args.feed == 'composited':
-        p0 = subprocess.Popen(cmd0)
-        p0.wait()
+        dlIOS = subprocess.Popen(dlIOSCmd)
+        dlIOS.wait()
+
+        if (dlIOS.returncode != 0 and o['composited_feeds']):
+            dlComposited = subprocess.Popen(dlCompositedCmd, env=env)
+            dlComposited.wait()
+
+            # Creates valid version of composited video
+            validComposited = subprocess.Popen(validCompositedCmd)
+            validComposited.wait()
+
+            # Deletes old version
+            deleteComposited = subprocess.Popen(deleteCompositedCmd)
+            deleteComposited.wait()
     else:
-        p1 = subprocess.Popen(cmd1, env=env)
-        p1.wait()
-        p4 = subprocess.Popen(cmd4)
-        p4.wait()
-        p5 = subprocess.Popen(cmd5)
-        p5.wait()
+        dlMain = subprocess.Popen(dlMainCmd, env=env)
+        dlMain.wait()
+
+        validMain = subprocess.Popen(validMainCmd)
+        validMain.wait()
+
+        deleteMain = subprocess.Popen(deleteMainCmd)
+        deleteMain.wait()
 
 if __name__ == "__main__":
     main()
